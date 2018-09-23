@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import PIL
 
+from htmltools import javascript_link, image_link
 
 segment_x=[]
 segment_y=[]
@@ -58,30 +59,45 @@ for ox,c in [(-2,1),(2,-1)]:
 shape = segment_x,segment_y,segment_z,segment_dx,segment_dy,segment_dz,segment_c
 print(len(segment_x))
 
-def make_aframe(shape):
-    return """<!DOCTYPE html>
-<html>
-  <head>
+EMBEDDED = True
+
+def head():
+    return """
     <meta charset="utf-8">
     <title>MagVR</title>
     <meta name="description" content="MagVR">
-    <script src="https://aframe.io/releases/0.8.2/aframe.min.js"></script>
-    <script src="https://cdn.rawgit.com/donmccurdy/aframe-extras/v4.1.3/dist/aframe-extras.min.js"></script>
-    <script src="https://unpkg.com/aframe-orbit-controls@1.2.0/dist/aframe-orbit-controls.min.js"></script>    
+    %s
+    %s
+    %s
+    """ %(
+        javascript_link("https://aframe.io/releases/0.8.2/aframe.min.js",embedded=EMBEDDED),
+        javascript_link("https://cdn.rawgit.com/donmccurdy/aframe-extras/v4.1.3/dist/aframe-extras.min.js",embedded=EMBEDDED),
+        javascript_link("https://unpkg.com/aframe-orbit-controls@1.2.0/dist/aframe-orbit-controls.min.js",embedded=EMBEDDED)
+    )
+
+def assets():
+    return image_link("B.png",id="B1",embedded=EMBEDDED)+image_link("B2.png",id="B2",embedded=EMBEDDED)
+def make_aframe(shape):
+    h=head()
+    a=assets()
+    tube = shape_as_tube(shape)
+    return """<!DOCTYPE html>
+<html>
+  <head>
+%(h)s
   </head>
   <body>
     <a-scene background="color: #000011">
     <a-assets>
-      <img id="B1" src="B.png">
-      <img id="B2" src="B2.png">
+%(a)s
     </a-assets>
-%s
+%(tube)s
     <a-plane position="0 0 0" src="#B1" rotation="0 0 0" width="20" height="20" color="#7BC8A4" material="side: double; transparent: false; alphaTest: 0.5;"></a-plane>
     <a-plane position="0 0 0" src="#B2" rotation="90 0 0" width="20" height="20" color="#7BC8A4" material="side: double; transparent: false; alphaTest: 0.5;"></a-plane>
     <a-entity camera look-controls orbit-controls="target: 0 1.6 -0.5; minDistance: 0.5; maxDistance: 180; initialPosition: 0 5 15"></a-entity>
     </a-scene>
   </body>
-</html>"""%(shape_as_tube(shape))
+</html>"""%locals()
 
 def shape_as_tube(shape,radius=0.1):
     x,y,z,dx,dy,dz,c=shape
