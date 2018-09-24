@@ -13,6 +13,7 @@ def Rz(a):
     return np.array([[np.cos(a),np.sin(a),0],[-np.sin(a),np.cos(a),0],[0,0,1]],np.double)
 
 class Segment:
+    radius=0.1
     def __init__(self,current=1.0,*points):
         self.points = []
         self.current=current
@@ -91,7 +92,9 @@ class Segment:
             segment = segment.add(w)
         return segment
 
-    def tube(self,radius=0.1):
+    def visualize(self,radius=None,embedded=False):
+        if radius is None:
+            radius=self.radius
         if self.current>0:
             material = 'material="color: red" '
         else:
@@ -113,8 +116,8 @@ class Segment:
 class Wire:
     def __init__(self,*segments):
         self.segments=segments
-    def tube(self,radius=0.1):
-        return "".join(segment.tube(radius=radius) for segment in self.segments)
+    def visualize(self,embedded=False):
+        return "".join(segment.visualize(embedded=embedded) for segment in self.segments)
     def elements(self):
         all_x=[]
         all_y=[]
@@ -205,11 +208,9 @@ class Calculator:
             Bz += cz
 
         return Bx, By, Bz
-    def grid_B(self,grid,name=None):
+    def grid_B(self,grid):
         Bx,By,Bz = self.grid_components_B(grid.x,grid.y,grid.z)
-        if name is None:
-            name = 'B_'+str(grid.name)
-        return Grid(Bx,By,Bz,name=name)
+        return Grid(Bx,By,Bz)
 
 class Grid:
     def __init__(self,x,y,z):
@@ -230,6 +231,15 @@ class Grid:
         vx,vy,vz=v
         return Grid(self.x+vx,self.y+vy,self.z+vz)
 
+    def __add__(self, other):
+        return Grid(self.x+other.x,self.y+other.y,self.z+other.z)
+    def __sub__(self, other):
+        return Grid(self.x-other.x,self.y-other.y,self.z-other.z)
+    def __mul__(self, other):
+        return self.scale(other)
+    def __rmul__(self, other):
+        return self.scale(other)
+
     def transform(self,m):
         return Grid(
             m[0][0] * x + m[0][1] * y + m[0][2] * z,
@@ -243,8 +253,11 @@ class Grid:
     def rot_z(self,a):
         return self.transform(Rz(a))
 
+    def length(self):
+        return np.sqrt(self.x*self.x + self.y*self.y + self.z*self.z)
+
     @classmethod
-    def plane(self,x1,y1,x2,y2,level=0.0,nx=100,ny=100):
+    def plane(cls,x1,y1,x2,y2,level=0.0,nx=100,ny=100):
         span_x = np.linspace(x1, x2, nx)
         span_y = np.linspace(y1, y2, ny)
         x=span_x.repeat(ny).reshape((nx, ny))
@@ -253,7 +266,7 @@ class Grid:
         return Grid(x,y,z)
 
     @classmethod
-    def space(self,x1,y1,z1,x2,y2,z1,z2,nx=100,ny=100,nz=100):
+    def space(cls,x1,y1,z1,x2,y2,z2,nx=10,ny=10,nz=10):
         span_z = np.linspace(z1, z2, nz)
         x=[]
         y=[]
@@ -263,7 +276,15 @@ class Grid:
             x.append(g.x)
             y.append(g.y)
             z.append(g.z)
-        return Grid(np.array(x),np.array(y),np.array(z),name=name)
+        return Grid(np.array(x),np.array(y),np.array(z))
+
+    @classmethod
+    def cube(cls,a=1.0,n=10):
+        return cls.space(-a,-a,-a, a, a, a, nx=n, ny=n, nz=n)
+
+    @classmethod
+    def random(cls,a=1.0,n=10):
+        return Grid(np.random.uniform(-a,a,n),np.random.uniform(-a,a,n),np.random.uniform(-a,a,n))
 
 class Gradient:
     def __init__(self,*vrgba):
@@ -277,18 +298,131 @@ class Gradient:
         self.b=np.array([entry[3] for entry in vrgba],np.double)
         self.a=np.array([entry[4] for entry in vrgba],np.double)
 
-class GridLines:
-    def __init__(self,grid,scale=1.0):
+class FieldLines:
+    def __init__(self,grid,scale=0.1, color="green"):
         self.grid=grid
         self.scale=scale
         self.field = grid.zero()
+        self.color=color
     def calculate(self,calculator):
-        self.field = calculator.grid_B(self.grid)
+        self.field = calculator.grid_B(self.grid).scale(self.scale)
+    def visualize(self,embedded=False):
+        x0=self.grid.x.flatten()
+        y0=self.grid.y.flatten()
+        z0=self.grid.z.flatten()
+        dx=self.field.x.flatten()
+        dy=self.field.y.flatten()
+        dz=self.field.z.flatten()
+        s=""
+        color=self.color
+        for i in range(len(x0)):
+            x1 = x0[i]
+            y1 = y0[i]
+            z1 = z0[i]
+            x2 = x0[i] + dx[i]
+            y2 = y0[i] + dy[i]
+            z2 = z0[i] + dz[i]
+
+            s+='<a-entity line="start: %(x1)f %(y1)f %(z1)f ; end: %(x2)f %(y2)f %(z2)f; color: %(color)s"></a-entity>\n'%locals()
+        return s
+
+class DensitySample:
+    def __init__(self,a=1.0,n=100,sample_grid=None,color="white"):
+        if sample_grid is None:
+            sample_grid=Grid.cube(a,10)
+        self.sample_grid=sample_grid
+        self.a=a
+        self.n=n
+        self.grid=None
+        self.color=color
+    def calculate(self,calculator):
+        maxfield=calculator.grid_B(self.sample_grid).length().max()
+        x=[]
+        y=[]
+        z=[]
+        n=self.n
+        while len(x)<n:
+            g = Grid.random(self.a,n)
+            r = np.random.uniform(0.0,1.5*maxfield,n)
+            length = calculator.grid_B(g).length()
+            index = length>=r
+            x.extend(g.x[index])
+            y.extend(g.y[index])
+            z.extend(g.z[index])
+        x = x[:n]
+        y = y[:n]
+        z = z[:n]
+        self.grid=Grid(np.array(x),np.array(y),np.array(z))
+    def visualize(self,embedded=False):
+        x=self.grid.x.flatten()
+        y=self.grid.y.flatten()
+        z=self.grid.z.flatten()
+        s=""
+        color=self.color
+        for i in range(len(x)):
+            x1 = x[i]
+            y1 = y[i]
+            z1 = z[i]
+            x2 = x[i]
+            y2 = y[i]
+            z2 = z[i]+0.1
+            s+='<a-entity line="start: %(x1)f %(y1)f %(z1)f ; end: %(x2)f %(y2)f %(z2)f; color: %(color)s"></a-entity>\n'%locals()
+        return s
+
+
+class DensityFieldLines:
+    def __init__(self,a=1, scale=0.1, lines=100, segments=5, ds=None, color="green"):
+        if ds is None:
+            ds = DensitySample(a,lines)
+        self.ds=ds
+        self.scale=scale
+        self.lines=lines
+        self.segments=segments
+        self.color=color
+
+    def calculate(self,calculator):
+        self.ds.calculate(calculator)
+        grid1 = self.ds.grid
+        grid2 = grid1.clone()
+        self.lx=[grid1.x]
+        self.ly=[grid1.y]
+        self.lz=[grid1.z]
+        for i in range(self.segments):
+            dg1 = calculator.grid_B(grid1).scale(self.scale)
+            grid1 = grid1 + dg1
+            dg2 = calculator.grid_B(grid2).scale(self.scale)
+            grid2 = grid2 - dg2
+            self.lx = [grid1.x] + self.lx + [grid2.x]
+            self.ly = [grid1.y] + self.ly + [grid2.y]
+            self.lz = [grid1.z] + self.lz + [grid2.z]
+    def visualize(self,embedded=False):
+        color=self.color
+        s=""
+        for i in range(len(self.lx)-1):
+            sx1 = self.lx[i]
+            sx2 = self.lx[i+1]
+            sy1 = self.ly[i]
+            sy2 = self.ly[i+1]
+            sz1 = self.lz[i]
+            sz2 = self.lz[i+1]
+            for j in range(len(sx1)):
+                x1 = sx1[j]
+                x2 = sx2[j]
+                y1 = sy1[j]
+                y2 = sy2[j]
+                z1 = sz1[j]
+                z2 = sz2[j]
+                s+='<a-entity line="start: %(x1)f %(y1)f %(z1)f ; end: %(x2)f %(y2)f %(z2)f; color: %(color)s"></a-entity>\n'%locals()
+        return s
 
 class Simulation:
-    def __init__(self,wire):
+    def __init__(self,wire,*simulations):
         self.wire=wire
         self.calculator = wire.calculator()
+        self.simulations=simulations
+        for i,s in enumerate(simulations):
+            print(i)
+            s.calculate(self.calculator)
 
     def head(self,title,embedded=False):
         return """
@@ -309,7 +443,8 @@ class Simulation:
 
     def visualize(self,title="pymagf",path=None,embedded=False,wire_radius=0.1):
         head = self.head(title,embedded=embedded)
-        tube = self.wire.tube(radius=wire_radius)
+        tube = self.wire.visualize(embedded=embedded)
+        simulations = "\n\n".join(s.visualize(embedded=embedded) for s in self.simulations)
         html="""<!DOCTYPE html>
 <html>
   <head>
@@ -320,6 +455,7 @@ class Simulation:
     <a-assets>
     </a-assets>
 %(tube)s
+%(simulations)s
     <a-entity camera look-controls orbit-controls="target: 0 1.6 -0.5; minDistance: 0.5; maxDistance: 180; initialPosition: 0 5 15"></a-entity>
     </a-scene>
   </body>
