@@ -1,5 +1,6 @@
 import numpy as np
 from htmltools import javascript_link, image_link
+from PIL import Image
 
 
 def Rx(a):
@@ -242,9 +243,9 @@ class Grid:
 
     def transform(self,m):
         return Grid(
-            m[0][0] * x + m[0][1] * y + m[0][2] * z,
-            m[1][0] * x + m[1][1] * y + m[1][2] * z,
-            m[2][0] * x + m[2][1] * y + m[2][2] * z,
+            m[0][0] * self.x + m[0][1] * self.y + m[0][2] * self.z,
+            m[1][0] * self.x + m[1][1] * self.y + m[1][2] * self.z,
+            m[2][0] * self.x + m[2][1] * self.y + m[2][2] * self.z,
         )
     def rot_x(self,a):
         return self.transform(Rx(a))
@@ -306,6 +307,8 @@ class FieldLines:
         self.color=color
     def calculate(self,calculator):
         self.field = calculator.grid_B(self.grid).scale(self.scale)
+    def assets(self,embedded=False):
+        return ""
     def visualize(self,embedded=False):
         x0=self.grid.x.flatten()
         y0=self.grid.y.flatten()
@@ -353,6 +356,8 @@ class DensitySample:
         y = y[:n]
         z = z[:n]
         self.grid=Grid(np.array(x),np.array(y),np.array(z))
+    def assets(self,embedded=False):
+        return ""
     def visualize(self,embedded=False):
         x=self.grid.x.flatten()
         y=self.grid.y.flatten()
@@ -395,6 +400,8 @@ class DensityFieldLines:
             self.lx = [grid1.x] + self.lx + [grid2.x]
             self.ly = [grid1.y] + self.ly + [grid2.y]
             self.lz = [grid1.z] + self.lz + [grid2.z]
+    def assets(self,embedded=False):
+        return ""
     def visualize(self,embedded=False):
         color=self.color
         s=""
@@ -414,6 +421,37 @@ class DensityFieldLines:
                 z2 = sz2[j]
                 s+='<a-entity line="start: %(x1)f %(y1)f %(z1)f ; end: %(x2)f %(y2)f %(z2)f; color: %(color)s"></a-entity>\n'%locals()
         return s
+
+class PlaneTest:
+    def __init__(self,a=5,n=100):
+        self.a = a
+        self.grid = Grid.plane(-a,-a,a,a,level=0.0,nx=n,ny=n).rot_x(90)
+    def calculate(self,calculator):
+        self.field =  calculator.grid_B(self.grid).length()
+    def assets(self,embedded=False):
+        g = self.field.copy().T
+        g[g < 0] = 0
+        maxval = 0.5*np.max(g)
+        g[g > maxval] = maxval
+        transparentfactor = 0.01
+        transparent = transparentfactor * maxval
+        transparentindex = g < transparent
+        g *= 255 / maxval
+        g = np.array(g, np.uint8)
+        a = np.zeros((g.shape[0], g.shape[1], 4), np.uint8)
+        a[:, :, 0] = g
+        a[:, :, 1] = g
+        a[:, :, 2] = g
+        a[:, :, 3] = 255 - 255 * transparentindex
+        image = Image.fromarray(a, "RGBA")
+        image.save("B.png")
+        return image_link("B.png",id="B",embedded=embedded)
+
+    def visualize(self,embedded=False):
+        aa=self.a*2
+        return  '<a-plane position="0 0 0" src="#B" rotation="90 0 0" width="%(aa)f" height="%(aa)f" color="#7BC8A4" material="side: double; transparent: false; alphaTest: 0.5;"></a-plane>'%locals()
+
+
 
 class Simulation:
     def __init__(self,wire,*simulations):
@@ -444,6 +482,7 @@ class Simulation:
     def visualize(self,title="pymagf",path=None,embedded=False,wire_radius=0.1):
         head = self.head(title,embedded=embedded)
         tube = self.wire.visualize(embedded=embedded)
+        assets = "\n\n".join(s.assets(embedded=embedded) for s in self.simulations)
         simulations = "\n\n".join(s.visualize(embedded=embedded) for s in self.simulations)
         html="""<!DOCTYPE html>
 <html>
@@ -453,6 +492,7 @@ class Simulation:
   <body>
     <a-scene background="color: #000011">
     <a-assets>
+%(assets)s
     </a-assets>
 %(tube)s
 %(simulations)s
