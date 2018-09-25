@@ -117,6 +117,29 @@ class Segment:
 class Wire:
     def __init__(self,*segments):
         self.segments=segments
+    def __add__(self, other):
+        return Wire(*(list(self.segments)+list(other.segments)))
+    def clone(self):
+        return Wire(*[s.clone() for s in self.segments])
+    def move(self,v):
+        return Wire(*[s.move(v) for s in self.segments])
+
+    def transform(self,m):
+        return Wire(*[s.transform(m) for s in self.segments])
+
+    def rot_x(self, a):
+        return Wire(*[s.rot_x(a) for s in self.segments])
+    def rot_y(self, a):
+        return Wire(*[s.rot_y(a) for s in self.segments])
+    def rot_z(self, a):
+        return Wire(*[s.rot_z(a) for s in self.segments])
+
+    def set_current(self,current):
+        w = self.clone()
+        for s in w.segments:
+            s.current = current
+        return w
+
     def visualize(self,embedded=False):
         return "".join(segment.visualize(embedded=embedded) for segment in self.segments)
     def elements(self):
